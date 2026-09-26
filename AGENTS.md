@@ -48,7 +48,10 @@
 - `CHANGELOG.md` holds one section per version; the release workflow copies
   that section onto the release page and fails when it is missing.
 - `site/` is the static sys1.io landing page; it has no product-runtime
-  connection.
+  connection. `site/404.html` renders the shared design-kit status page;
+  `scripts/build-site-status-page.ts --refresh` regenerates its markup,
+  stylesheet, and `site/status-page.js` from one tagged design-kit release, and
+  `test/site-status-page.test.ts` checks them against the recorded digests.
 - `.github/workflows/check.yml` is read-only CI. `release.yml` is the annotated
   stable-tag channel for exact cross-platform artifacts and immutable GitHub
   Releases; it does not publish npm.

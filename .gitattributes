@@ -11,3 +11,9 @@
 
 # Release pages copy changelog bytes.
 /CHANGELOG.md text eol=lf
+
+# Status page receipts hash checked-out bytes.
+/site/vendor/hraness-status-page/** text eol=lf
+/scripts/site-status-page.js text eol=lf
+/site/status-page.js text eol=lf
+/site/404.html text eol=lf
