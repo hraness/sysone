@@ -5,22 +5,23 @@
 html { scroll-padding-bottom: 4rem; scroll-behavior: smooth; scroll-padding-top: 6rem; scrollbar-color: var(--line) var(--background); }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-text); line-height: 1.65; }
 ::selection { background: var(--primary-soft); color: var(--foreground); }
-a:not(:where(.hraness-site-footer a)) { color: var(--primary); text-underline-offset: .2em; text-decoration-thickness: 1px; }
-a:not(:where(.hraness-site-footer a)):hover { text-decoration: underline; }
+a:not(:where(.hraness-site-footer a, .hraness-status-page a)) { color: var(--primary); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:not(:where(.hraness-site-footer a, .hraness-status-page a)):hover { text-decoration: underline; }
 button, select { font: inherit; }
 button, a, select, summary { -webkit-tap-highlight-color: transparent; }
 :focus-visible:not(:where(.hraness-site-footer *, [data-hraness-appearance-menu] *)) { outline: 2px solid var(--focus); outline-offset: 4px; }
 button { cursor: pointer; }
 main svg, .button svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
-h1, h2 { font-family: var(--hraness-marketing-display-font); font-weight: 550; text-wrap: balance; }
-h1 { font-size: var(--hraness-marketing-h1-size); line-height: 1.06; letter-spacing: -.025em; margin: 0 0 1.5rem; }
-h2 { font-size: var(--hraness-marketing-h2-size); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 1.5rem; }
+/* The shared status page (404) sets its own type in a design-kit layer; element rules skip it. */
+:is(h1, h2):not(:where(.hraness-status-page *)) { font-family: var(--hraness-marketing-display-font); font-weight: 550; text-wrap: balance; }
+h1:not(:where(.hraness-status-page *)) { font-size: var(--hraness-marketing-h1-size); line-height: 1.06; letter-spacing: -.025em; margin: 0 0 1.5rem; }
+h2:not(:where(.hraness-status-page *)) { font-size: var(--hraness-marketing-h2-size); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 1.5rem; }
 /* Reference pages share a compact reading hierarchy; marketing keeps its display scale. */
 .reference-page { --hraness-marketing-h1-size: clamp(2.25rem, 4.5vw, 4rem); --hraness-marketing-h2-size: clamp(1.85rem, 2.5vw, 2.25rem); --sys1-title-measure: 22ch; --sys1-reference-space: clamp(2.25rem, 4vw, 3.25rem); }
 .reference-page h1 { line-height: 1.12; letter-spacing: -.035em; }
 .reference-page h2 { line-height: 1.15; margin-bottom: 1rem; }
-h3 { font-size: 1.125rem; font-weight: 600; line-height: 1.4; margin: 0 0 .75rem; }
-p { margin: 0 0 1rem; }
+h3:not(:where(.hraness-status-page *)) { font-size: 1.125rem; font-weight: 600; line-height: 1.4; margin: 0 0 .75rem; }
+p:not(:where(.hraness-status-page *)) { margin: 0 0 1rem; }
 pre, code { font-family: var(--font-mono); font-size: .84em; }
 p code, dd > code { color: var(--foreground); overflow-wrap: anywhere; }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
