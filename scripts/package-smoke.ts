@@ -302,15 +302,16 @@ export async function packageSmoke(tarballArgument?: string): Promise<void> {
     }
     const installedCli = join(packageTarget, "dist", "cli.js");
     const version = (await run([process.execPath, installedCli, "--version"], { cwd: consumer, env })).trim();
-    if (version !== manifest["version"]) {
+    if (version !== `sys1 ${String(manifest["version"])}`) {
       throw new Error(`packed CLI version ${version} does not match ${String(manifest["version"])}`);
     }
     const help = await run([process.execPath, installedCli, "--help"], { cwd: consumer, env });
     if (
-      !help.includes("setup [--tier compact|quality]") ||
-      !help.includes("jev status|enable|disable") ||
-      !help.includes("doctor [--json]") ||
-      !help.includes("pull [MODEL]")
+      !help.startsWith("Usage: sys1 <command> [options]") ||
+      !help.includes("sys1 setup [--dry-run]") ||
+      !help.includes("sys1 jev status|enable|disable") ||
+      !help.includes("sys1 doctor") ||
+      !help.includes("sys1 pull [<model>]")
     ) {
       throw new Error("packed CLI help is incomplete");
     }

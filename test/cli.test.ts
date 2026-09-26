@@ -24,7 +24,7 @@ async function runCli(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const child = Bun.spawn([process.execPath, CLI, ...args], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, SYS1_HOME: options.home, ...options.env },
+    env: { ...process.env, HRANESS_AUDIENCE: "quiet", SYS1_HOME: options.home, ...options.env },
     stdout: "pipe",
     stderr: "pipe",
   });

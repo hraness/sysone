@@ -64,7 +64,7 @@ function boundedDetail(value: string, home: string): string {
 
 function stateDirectoryCheck(home: string): DoctorCheck {
   if (home.length === 0 || home.length > 4_096) {
-    return { id: "state.directory", status: "fail", summary: "state directory path is invalid" };
+    return { id: "state.directory", status: "fail", summary: "the state folder path is invalid; set SYS1_HOME to a folder you can write to" };
   }
   let target = home;
   for (let i = 0; i < 32 && !existsSync(target); i += 1) {
@@ -75,16 +75,16 @@ function stateDirectoryCheck(home: string): DoctorCheck {
   try {
     const stats = statSync(target);
     if (!stats.isDirectory()) {
-      return { id: "state.directory", status: "fail", summary: "state path parent is not a directory" };
+      return { id: "state.directory", status: "fail", summary: "the state folder path points inside a file, not a folder" };
     }
     accessSync(target, constants.R_OK | constants.W_OK);
     return {
       id: "state.directory",
       status: "pass",
-      summary: existsSync(home) ? "state directory is readable and writable" : "state directory can be created",
+      summary: existsSync(home) ? "state folder is readable and writable" : "state folder can be created",
     };
   } catch {
-    return { id: "state.directory", status: "fail", summary: "state directory is not accessible" };
+    return { id: "state.directory", status: "fail", summary: "state folder isn't readable and writable" };
   }
 }
 
@@ -109,11 +109,11 @@ function modelChecks(home: string): {
       manifest: {
         id: "models.manifest",
         status: "fail",
-        summary: "model manifest is invalid",
+        summary: "the list of installed models is damaged",
         detail: boundedDetail(loaded.message, home),
       },
-      files: { id: "models.files", status: "fail", summary: "model files cannot be evaluated" },
-      inventory: { id: "models.inventory", status: "warn", summary: "model inventory cannot be reconciled" },
+      files: { id: "models.files", status: "fail", summary: "model files can't be checked" },
+      inventory: { id: "models.inventory", status: "warn", summary: "model folder can't be compared with the installed list" },
       validModelIds: [],
     };
   }
@@ -125,14 +125,14 @@ function modelChecks(home: string): {
     if (!inspection.ok) {
       problems.push({ id: model.id, issue: boundedDetail(inspection.message ?? "inspection failed", home) });
     } else if (inspection.bytes !== model.bytes) {
-      problems.push({ id: model.id, issue: "byte count differs from the admitted manifest" });
+      problems.push({ id: model.id, issue: "file size differs from the size recorded at install" });
     }
   }
 
   let inventory: DoctorCheck = {
     id: "models.inventory",
     status: "pass",
-    summary: "model store has no stale or unmanaged files",
+    summary: "model folder has no leftover or unknown files",
   };
   const directory = modelsDir(home);
   if (existsSync(directory)) {
@@ -154,7 +154,7 @@ function modelChecks(home: string): {
         inventory = {
           id: "models.inventory",
           status: "warn",
-          summary: "model store contains files that need operator review",
+          summary: "model folder has files sys1 didn't install (leftover downloads, unknown models or links); check them before deleting",
           detail: {
             stale_downloads: stale,
             orphaned_ggufs: orphaned,
@@ -164,7 +164,7 @@ function modelChecks(home: string): {
         };
       }
     } catch {
-      inventory = { id: "models.inventory", status: "fail", summary: "model store cannot be read" };
+      inventory = { id: "models.inventory", status: "fail", summary: "model folder can't be read" };
     }
   }
 
@@ -172,19 +172,19 @@ function modelChecks(home: string): {
     manifest: {
       id: "models.manifest",
       status: "pass",
-      summary: `${manifest.models.length} model${manifest.models.length === 1 ? "" : "s"} registered`,
+      summary: `${manifest.models.length} model${manifest.models.length === 1 ? "" : "s"} installed`,
     },
     files:
       problems.length === 0
         ? {
             id: "models.files",
             status: "pass",
-            summary: `${manifest.models.length} admitted model file${manifest.models.length === 1 ? "" : "s"} structurally valid`,
+            summary: `${manifest.models.length} model file${manifest.models.length === 1 ? "" : "s"} present and readable`,
           }
         : {
             id: "models.files",
             status: "fail",
-            summary: `${problems.length} admitted model file${problems.length === 1 ? "" : "s"} invalid`,
+            summary: `${problems.length} model file${problems.length === 1 ? " is" : "s are"} missing or damaged; run sys1 pull again`,
             detail: problems,
           },
     inventory,
@@ -210,21 +210,21 @@ function routingCheck(
   }).length;
   if (explicit > 0 && (config.routing.policy === "hosted-only" ? !hosted
       : config.routing.policy === "local-only" ? !local : !hosted && !local)) {
-    return { id: "routing.candidates", status: "warn", summary: "only explicit HTTP routes are configured; name a backend/model in each request" };
+    return { id: "routing.candidates", status: "warn", summary: 'only named HTTP backends are set up; each request must name one as "model": "backend/model"' };
   }
   if (config.routing.policy === "hosted-only" && !hosted) {
-    return { id: "routing.candidates", status: "fail", summary: "hosted-only has no configured credential" };
+    return { id: "routing.candidates", status: "fail", summary: "routing is set to hosted Jev only, but no Jev credential is set" };
   }
   if (config.routing.policy === "local-only" && !local) {
-    return { id: "routing.candidates", status: "fail", summary: `selected local model ${config.local.model} is unavailable; run sys1 setup or explicitly pin another backend` };
+    return { id: "routing.candidates", status: "fail", summary: `local model ${config.local.model} isn't available; run sys1 setup or name another backend in each request` };
   }
   if (!hosted && !local) {
-    return { id: "routing.candidates", status: "warn", summary: `no automatic route is available; selected local model ${config.local.model} is not installed or enabled` };
+    return { id: "routing.candidates", status: "warn", summary: `nothing can answer requests yet: local model ${config.local.model} isn't installed or turned on` };
   }
   return {
     id: "routing.candidates",
     status: "pass",
-    summary: "routing has at least one configured candidate",
+    summary: "at least one model can answer requests",
     detail: { hosted, local },
   };
 }
@@ -232,13 +232,13 @@ function routingCheck(
 function daemonCheck(state: DaemonState): DoctorCheck {
   switch (state.state) {
     case "running":
-      return { id: "daemon", status: "pass", summary: "daemon is running and healthy" };
+      return { id: "daemon", status: "pass", summary: "background gateway is running" };
     case "stopped":
-      return { id: "daemon", status: "pass", summary: "daemon is stopped" };
+      return { id: "daemon", status: "pass", summary: "background gateway is stopped" };
     case "stale_pidfile":
-      return { id: "daemon", status: "warn", summary: "daemon pid file is stale or unhealthy" };
+      return { id: "daemon", status: "warn", summary: "background gateway isn't responding, or its process record is out of date" };
     case "foreign_listener":
-      return { id: "daemon", status: "fail", summary: "configured port is owned by another listener" };
+      return { id: "daemon", status: "fail", summary: "another program is using the gateway port" };
   }
 }
 
@@ -257,18 +257,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const config = loadedConfig.ok ? loadedConfig.config : DEFAULT_CONFIG;
   checks.push(
     loadedConfig.ok
-      ? { id: "config", status: "pass", summary: loadedConfig.existed ? "config is valid" : "defaults are valid" }
+      ? { id: "config", status: "pass", summary: loadedConfig.existed ? "settings are valid" : "no settings file yet; the defaults are valid" }
       : {
           id: "config",
           status: "fail",
-          summary: "config is invalid",
+          summary: "the settings file is invalid",
           detail: boundedDetail(loadedConfig.message, options.home),
         },
   );
 
   const nativeProbe = options.nativeProbe ?? probeNativeRuntime;
   if (!config.local.enabled) {
-    checks.push({ id: "native.runtime", status: "pass", summary: "builtin local inference is disabled" });
+    checks.push({ id: "native.runtime", status: "pass", summary: "local model is turned off" });
   } else {
     const native = await nativeProbe();
     checks.push(
@@ -276,7 +276,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         ? {
             id: "native.runtime",
             status: "pass",
-            summary: `llama.cpp is available via ${native.backend ?? "cpu"}`,
+            summary: `local model runtime (llama.cpp) is available via ${native.backend ?? "cpu"}`,
             detail: {
               gpu_offloading: native.gpu_offloading ?? false,
               supported_backends: native.supported_backends ?? [],
@@ -288,7 +288,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         : {
             id: "native.runtime",
             status: "fail",
-            summary: "llama.cpp runtime is unavailable",
+            summary: "local model runtime (llama.cpp) isn't available on this computer",
             ...(native.message === undefined
               ? {}
               : { detail: boundedDetail(native.message, options.home) }),
@@ -301,14 +301,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   checks.push(
     loadedConfig.ok
       ? routingCheck(config, env, models.validModelIds)
-      : { id: "routing.candidates", status: "fail", summary: "routing cannot be evaluated until config is fixed" },
+      : { id: "routing.candidates", status: "fail", summary: "routing can't be checked until the config is fixed" },
   );
 
   if (loadedConfig.ok) {
     const daemonProbe = options.daemonProbe ?? daemonStatus;
     checks.push(daemonCheck(await daemonProbe(options.home, config)));
   } else {
-    checks.push({ id: "daemon", status: "warn", summary: "daemon check skipped because config is invalid" });
+    checks.push({ id: "daemon", status: "warn", summary: "gateway check skipped because the config is invalid" });
   }
 
   const counts = checks.reduce(

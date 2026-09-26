@@ -26,7 +26,7 @@
     <link rel="stylesheet" href="/vendor/hraness-site-footer/stylex.css" />
     <link rel="stylesheet" href="/vendor/hraness-appearance/appearance-menu.css" />
     <link rel="stylesheet" href="/style.css" />
-    <link rel="stylesheet" href="/docs.css?v=0.10.0" />
+    <link rel="stylesheet" href="/docs.css?v=0.11.0" />
     <script src="/site.js" defer></script>
   </head>
   <body>
@@ -62,7 +62,7 @@
         <div class="docs-hero-inner">
           <h1 id="docs-title">Sys1 documentation</h1>
           <p class="docs-lede">Sys1 gives an agent or application one request format for yes/no, choice, and score decisions. Start with a local model, turn on hosted Jev when you want it, embed the router in a Bun app, or connect a compatible HTTP service.</p>
-          <div class="docs-meta"><span>Sys1 0.10.0</span><span>Node client · Bun router · loopback HTTP</span><a href="/docs/evaluations">Read the evaluations</a></div>
+          <div class="docs-meta"><span>Sys1 0.11.0</span><span>Node client · Bun router · loopback HTTP</span><a href="/docs/evaluations">Read the evaluations</a></div>
         </div>
       </section>
 
@@ -99,7 +99,7 @@ sys1 up</code></pre>
               <div class="docs-route">
                 <div><h3>Install the pinned release</h3><p>Install the release file from GitHub when you want the CLI without building from source. <code>--allow-scripts=node-llama-cpp</code> lets only the native inference package run its install script.</p></div>
                 <pre><code>npm install --global --allow-scripts=node-llama-cpp \
-  https://github.com/hraness/sys1/releases/download/v0.10.0/hraness-sys1-0.10.0.tgz
+  https://github.com/hraness/sys1/releases/download/v0.11.0/hraness-sys1-0.11.0.tgz
 sys1 doctor</code></pre>
               </div>
             </div>
@@ -111,7 +111,7 @@ sys1 doctor</code></pre>
             <p class="docs-intro">The request and response contract stays the same while the lifecycle belongs to the mode you choose.</p>
             <div class="docs-mode-list">
               <div class="docs-mode"><h3>Portable client</h3><p>Use the dependency-light <code>@hraness/sys1/client</code> entry from Node 24 or Bun. It validates requests, bounds response bodies, propagates cancellation, and makes one explicit HTTP attempt.</p><pre><code>npm install --omit=optional \
-  https://github.com/hraness/sys1/releases/download/v0.10.0/hraness-sys1-0.10.0.tgz</code></pre><a href="https://github.com/hraness/sys1#use-as-a-module">Client guide <span aria-hidden="true">↗</span></a></div>
+  https://github.com/hraness/sys1/releases/download/v0.11.0/hraness-sys1-0.11.0.tgz</code></pre><a href="https://github.com/hraness/sys1#use-as-a-module">Client guide <span aria-hidden="true">↗</span></a></div>
               <div class="docs-mode"><h3>Embedded Bun router</h3><p>Use <code>createRouter</code> when your Bun application owns routing and local model lifecycle. It opens no port and exposes <code>evaluate</code>, <code>fetch</code>, and <code>dispose</code>.</p><a href="https://github.com/hraness/sys1#use-as-a-module">Embedded guide <span aria-hidden="true">↗</span></a></div>
               <div class="docs-mode"><h3>Loopback HTTP</h3><p>Run <code>sys1 up</code> for a local daemon. The endpoint is <code>POST /v1/systemone</code>; discovery is <code>GET /v1/models</code>; liveness is <code>GET /healthz</code>.</p><a href="https://github.com/hraness/sys1#the-endpoint">HTTP reference <span aria-hidden="true">↗</span></a></div>
             </div>

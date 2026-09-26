@@ -25,7 +25,10 @@ import {
 } from "./daemon.ts";
 import { probeAll, runtimeBackends } from "./backends.ts";
 import { DEFAULT_LOCAL_MODELS, LOCAL_MODEL_TIERS, platformRecommendation, type LocalModelTier } from "./defaults.ts";
-import { runDoctor } from "./doctor.ts";
+import { runDoctor, type DoctorCheck } from "./doctor.ts";
+import { bareScreen, commandHelp, rootHelp, SYS1_COMMANDS, SYS1_HELP_TOPICS } from "./cli-help.ts";
+import { closestMatch, detectAudience, sym, type SymbolName } from "./cli-style.ts";
+import { homedir } from "node:os";
 import { SYS1_VERSION, startGateway } from "./gateway.ts";
 import { probeNativeRuntime } from "./local/engine.ts";
 import { qualifyBackend } from "./qualification.ts";
@@ -33,6 +36,8 @@ import { createProfile } from "./profile.ts";
 import {
   MODEL_REGISTRY,
   installedModels,
+  modelsDir,
+  resolvePullTarget,
   pullModel,
   removeModel,
   storeBytes,
@@ -51,69 +56,60 @@ function err(text: string): void {
   process.stderr.write(`${text}\n`);
 }
 
-function fail(message: string, code: number): never {
-  err(`sys1: ${message}`);
+/** The command being run, for error next steps. */
+let currentCommand: string | undefined;
+let jsonRequested = false;
+
+const ERROR_CODES: Readonly<Record<number, string>> = { 1: "failed", 2: "usage", 3: "config", 4: "daemon", 5: "backend", 6: "doctor" };
+
+function sentence(message: string): string {
+  const text = message.trim().replace(/^usage: /u, "Usage: ");
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?`"]$/u.test(capital) ? capital : `${capital}.`;
+}
+
+function defaultNext(code: number): string {
+  const command = currentCommand !== undefined && commandHelp(currentCommand) !== undefined ? currentCommand : undefined;
+  if (code === EXIT.config) return "sys1 doctor";
+  if (code === EXIT.daemon) return "sys1 status";
+  if (code === EXIT.backend && command !== "backend" && command !== "pull" && command !== "model") return "sys1 doctor";
+  return command === undefined ? "sys1 --help" : `sys1 ${command} --help`;
+}
+
+/** SPEC § D5: one sentence and one next command, or one JSON error object for agents and --json. */
+function fail(message: string, code: number, next = defaultNext(code)): never {
+  if (wantsJsonOutput()) {
+    out(JSON.stringify({ ok: false, error: { code: ERROR_CODES[code] ?? "failed", message: sentence(message), next } }));
+  } else {
+    err(`${sym("fail", process.stderr)} ${sentence(message)}`);
+    err(`${sym("next", process.stderr)} ${next}`);
+  }
   process.exit(code);
 }
 
-const USAGE = `sys1: lets agents ask yes/no, choice, and score questions and get answers
+// TODO(df-0.8): use detectAudience from @hraness/desktop-foundation.
+function wantsJsonOutput(): boolean {
+  return jsonRequested || detectAudience() === "agent";
+}
 
-Usage: sys1 <command> [flags]
+function wantsJson(flags: Map<string, string | boolean>): boolean {
+  return flags.get("json") === true || detectAudience() === "agent";
+}
 
-Setup:
-  setup [--tier compact|quality] [--dry-run] [--json]
-                                Configure and install the experimental local default
-  jev status|enable|disable [--json]
-                                Manage explicit hosted Jev activation
+function isHuman(flags: Map<string, string | boolean>): boolean {
+  return !wantsJson(flags) && detectAudience() === "human";
+}
 
-Daemon:
-  up [--port N] [--json]        Start the gateway daemon in the background
-  down [--json]                 Stop the gateway daemon
-  serve [--port N]              Run the gateway in the foreground
-  status [--json]               Daemon state and backend reachability
-  doctor [--json]               Diagnose runtime, config, store, routing, daemon
+/** One `Next:` hint on stderr, for people only (SPEC § D7). */
+function hint(flags: Map<string, string | boolean>, next: string): void {
+  if (isHuman(flags)) err(`Next: ${next}`);
+}
 
-Models:
-  pull [MODEL] [--json]         Download + verify weights (experimental qwen3-1.7b default)
-  pull --list [--json]          Show the curated model registry
-  model list [--json]           Show installed models
-  model verify MODEL [--json]   Recompute and verify a model's sha256
-  model remove MODEL            Remove an installed model
-  models [--json]               List models across reachable backends
+function tildePath(path: string): string {
+  const home = homedir();
+  return home !== "" && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
 
-Routing:
-  backend list [--json]         List configured HTTP backends
-  backend add --name N --url U --model M [--adapter systemone|kev] [--size-b N] [--cost-rank N]
-                                Register a System One HTTP backend
-  backend check --name N [--json]
-                                Qualify discovery, limits, and all answer types
-  backend remove --name N       Remove an HTTP backend
-  config path                   Print the config file location
-  config get [--json]           Print the effective config
-  config set <key> <value>      Set a config key (see list below)
-  config unset <key>            Reset a key to its default
-
-Evaluate:
-  eval [--file path|-] [--json] Send a System One request through the gateway
-                                (reads the JSON request from --file or stdin)
-  eval --profile path [--file path|-] [--json]
-                                Apply a versioned profile to JSON {"state": ...}
-
-Flags:
-  --json                        Machine-readable output on supporting commands
-  --version                     Print version
-  --help                        This help
-
-Local tiers (both experimental): quality (default Qwen3 1.7B), compact (Qwen3 0.6B)
-${LOCAL_DECISION_NOTICE}
-Config keys: ${Object.keys(SETTABLE_KEYS).join(", ")}
-
-Environment:
-  SYS1_HOME                   State directory (default ~/.sys1)
-  TYPESAFE_API_KEY              Hosted Jev credential (used only after \`jev enable\`)
-
-Endpoint: POST http://127.0.0.1:13900/v1/systemone, GET /v1/models, GET /healthz
-`;
 
 interface ParsedArgs {
   positional: string[];
@@ -139,6 +135,8 @@ function parseArgs(argv: string[]): ParsedArgs {
           flags.set(arg.slice(2), true);
         }
       }
+    } else if (arg === "-h" || arg === "-V" || arg === "-v") {
+      flags.set(arg === "-h" ? "help" : "version", true);
     } else {
       positional.push(arg);
     }
@@ -203,18 +201,30 @@ async function cmdSetup(home: string, flags: Map<string, string | boolean>): Pro
   if (!recommendation.supported || recommendation.model === null) {
     fail(recommendation.reason, EXIT.backend);
   }
+  const model = recommendation.model;
+  const download = {
+    model,
+    bytes: MODEL_REGISTRY.find((entry) => entry.id === model)?.bytes ?? null,
+    directory: modelsDir(home),
+    installed: isInstalled(home, model),
+  };
+  const downloadLine = download.installed
+    ? `${model} is already installed in ${tildePath(download.directory)}.`
+    : `${model}${download.bytes === null ? "" : ` (${formatBytes(download.bytes)})`} to ${tildePath(download.directory)}`;
   if (flags.get("dry-run") === true) {
-    const report = { ok: true, dry_run: true, recommendation };
-    if (flags.get("json") === true) out(JSON.stringify(report, null, 2));
+    const report = { ok: true, dry_run: true, recommendation, download };
+    if (wantsJson(flags)) out(JSON.stringify(report, null, 2));
     else {
-      out(`platform: ${recommendation.target} (${recommendation.acceleration})`);
-      out(`default: ${recommendation.model} (${recommendation.tier}) — ${recommendation.reason}`);
+      out(`Platform: ${recommendation.target} (${recommendation.acceleration})`);
+      out(`Model: ${model} (${recommendation.tier}): ${recommendation.reason}`);
+      out(download.installed ? downloadLine : `Would download ${downloadLine}.`);
       out(LOCAL_DECISION_NOTICE);
+      hint(flags, "sys1 setup");
     }
     return;
   }
 
-  if (flags.get("json") !== true) out(LOCAL_DECISION_NOTICE);
+  if (!wantsJson(flags)) out(LOCAL_DECISION_NOTICE);
   const native = await probeNativeRuntime();
   if (!native.ok) fail(native.message ?? "local llama.cpp runtime is unavailable", EXIT.backend);
   const loaded = loadConfig(home);
@@ -226,22 +236,17 @@ async function cmdSetup(home: string, flags: Map<string, string | boolean>): Pro
   const existing = installedModels(home).find((model) => model.id === recommendation.model);
   let pull: PullResult | undefined;
   if (existing === undefined) {
-    let lastProgress = 0;
-    pull = await pullModel(home, recommendation.model, {
-      onProgress: (done, total) => {
-        if (flags.get("json") === true || Date.now() - lastProgress < 1_000) return;
-        lastProgress = Date.now();
-        const suffix = total === null ? "" : ` / ${formatBytes(total)}`;
-        err(`downloading ${recommendation.model}: ${formatBytes(done)}${suffix}`);
-      },
-    });
+    // Say how big the download is before the first byte (SPEC § D6).
+    if (isHuman(flags)) err(`${sym("progress", process.stderr)} Downloading ${downloadLine}…`);
+    const progress = downloadProgress(flags, recommendation.model);
+    pull = await pullModel(home, recommendation.model, { onProgress: progress.update });
+    progress.done();
     if (!pull.ok) {
-      if (flags.get("json") === true) {
+      if (wantsJson(flags)) {
         out(JSON.stringify({ ok: false, recommendation, pull }, null, 2));
-      } else {
-        err(`sys1: ${pull.message ?? "default model download failed"}`);
+        process.exit(EXIT.backend);
       }
-      process.exit(EXIT.backend);
+      fail(pull.message ?? "default model download failed", EXIT.backend, "sys1 setup");
     }
   }
 
@@ -261,12 +266,44 @@ async function cmdSetup(home: string, flags: Map<string, string | boolean>): Pro
       ...(existing === undefined ? { path: pull?.path, bytes: pull?.bytes } : { bytes: existing.bytes }),
     },
   };
-  if (flags.get("json") === true) out(JSON.stringify(report, null, 2));
+  if (wantsJson(flags)) out(JSON.stringify(report, null, 2));
   else {
-    out(`platform: ${recommendation.target} (${native.backend ?? "cpu"})`);
-    out(`${recommendation.model}: ${existing === undefined ? "installed" : "already installed"}`);
-    out("experimental local setup complete; run `sys1 up`");
+    out(`Platform: ${recommendation.target} (${native.backend ?? "cpu"})`);
+    out(`${sym("ok", process.stdout)} Local setup complete: ${recommendation.model} is ${existing === undefined ? "installed" : "already installed"} and turned on.`);
+    hint(flags, "sys1 up");
   }
+}
+
+/** Whether a model is installed; false when the store can't be read, so previews stay read-only. */
+function isInstalled(home: string, model: string): boolean {
+  try {
+    return installedModels(home).some((installed) => installed.id === model);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Download progress on a TTY stderr: one line redrawn in place at most once a
+ * second, cleared when the download ends. Nothing for JSON, agents or pipes.
+ */
+function downloadProgress(flags: Map<string, string | boolean>, model: string): {
+  update: (done: number, total: number | null) => void;
+  done: () => void;
+} {
+  const live = isHuman(flags) && process.stderr.isTTY === true && process.env.TERM !== "dumb";
+  let last = 0;
+  let drawn = false;
+  return {
+    update: (done, total) => {
+      if (!live || Date.now() - last < 1_000) return;
+      last = Date.now();
+      drawn = true;
+      const suffix = total === null ? "" : ` / ${formatBytes(total)}`;
+      process.stderr.write(`\r\x1b[K${sym("progress", process.stderr)} Downloading ${model}: ${formatBytes(done)}${suffix}`);
+    },
+    done: () => { if (drawn) process.stderr.write("\r\x1b[K"); },
+  };
 }
 
 function cmdJev(home: string, args: ParsedArgs): void {
@@ -283,7 +320,7 @@ function cmdJev(home: string, args: ParsedArgs): void {
       model: loaded.config.hosted.model,
       base_url: loaded.config.hosted.base_url,
     };
-    if (args.flags.get("json") === true) out(JSON.stringify(report, null, 2));
+    if (wantsJson(args.flags)) out(JSON.stringify(report, null, 2));
     else {
       out(`Jev: ${report.active ? "active" : report.enabled ? "enabled, credential missing" : "disabled"}`);
       out(`model: ${report.model}`);
@@ -300,7 +337,7 @@ function cmdJev(home: string, args: ParsedArgs): void {
     next.routing.policy = "hosted-only";
     const path = saveConfig(home, next);
     const report = { enabled: true, active: true, model: next.hosted.model, routing_policy: next.routing.policy, config_path: path };
-    if (args.flags.get("json") === true) out(JSON.stringify(report, null, 2));
+    if (wantsJson(args.flags)) out(JSON.stringify(report, null, 2));
     else {
       out(`Jev enabled for ${next.hosted.model} (${path})`);
       out("routing is hosted-only; local fallback requires an explicit policy change after evaluation");
@@ -314,7 +351,7 @@ function cmdJev(home: string, args: ParsedArgs): void {
     if (next.routing.policy === "hosted-only") next.routing.policy = "auto";
     const path = saveConfig(home, next);
     const report = { enabled: false, active: false, config_path: path };
-    if (args.flags.get("json") === true) out(JSON.stringify(report, null, 2));
+    if (wantsJson(args.flags)) out(JSON.stringify(report, null, 2));
     else out(`Jev disabled (${path})`);
     return;
   }
@@ -328,12 +365,15 @@ async function cmdUp(home: string, flags: Map<string, string | boolean>): Promis
   const cliEntry = process.argv[1];
   if (cliEntry === undefined) fail("cannot resolve cli entry", EXIT.daemon);
   const result = await daemonUp({ home, config, cliEntry, env: process.env });
-  if (flags.get("json") === true) {
+  if (wantsJson(flags)) {
     out(JSON.stringify(result));
   } else if (result.ok) {
-    out(`sys1 gateway running at ${result.url} (pid ${result.pid})`);
+    out(`${sym("ok", process.stdout)} Gateway running at ${result.url} (pid ${result.pid}).`);
+    hint(flags, "sys1 status");
+  } else if (result.message.startsWith("already running")) {
+    fail(`The gateway is ${result.message}; there is nothing to start.`, EXIT.daemon, "sys1 status");
   } else {
-    out(`sys1: ${result.message}`);
+    fail(`The gateway didn't start: ${result.message.replaceAll("daemon", "gateway")}`, EXIT.daemon, "sys1 doctor");
   }
   if (!result.ok) process.exit(EXIT.daemon);
 }
@@ -341,10 +381,14 @@ async function cmdUp(home: string, flags: Map<string, string | boolean>): Promis
 async function cmdDown(home: string, flags: Map<string, string | boolean>): Promise<void> {
   const config = mustConfig(home);
   const result = await daemonDown(home, config);
-  if (flags.get("json") === true) {
+  if (wantsJson(flags)) {
     out(JSON.stringify(result));
+  } else if (result.ok) {
+    const text = result.message.replace(/^stopped daemon (\d+)$/u, "Stopped the gateway (pid $1).")
+      .replace(/^not running/u, "The gateway isn't running");
+    out(`${sym("ok", process.stdout)} ${sentence(text)}`);
   } else {
-    out(`sys1: ${result.message}`);
+    fail(`The gateway didn't stop: ${result.message.replaceAll("daemon", "gateway")}`, EXIT.daemon, "sys1 status");
   }
   if (!result.ok) process.exit(EXIT.daemon);
 }
@@ -415,34 +459,35 @@ async function cmdStatus(home: string, flags: Map<string, string | boolean>): Pr
       probe: probes.get(backend.name)?.detail ?? null,
     })),
   };
-  if (flags.get("json") === true) {
+  if (wantsJson(flags)) {
     out(JSON.stringify(report, null, 2));
     return;
   }
-  out(`daemon: ${daemon.state}${daemon.state === "running" ? ` pid ${daemon.pid} ${gatewayUrl(daemon.host, daemon.port)}` : ""}`);
-  out(`routing: ${config.routing.policy}; selected local model: ${config.local.model}`);
-  out(`local store: ${localModels.length} model${localModels.length === 1 ? "" : "s"}, ${formatBytes(report.local_store.bytes)}`);
+  out(daemon.state === "running"
+    ? `${sym("on", process.stdout)} Gateway running at ${gatewayUrl(daemon.host, daemon.port)} (pid ${daemon.pid})`
+    : `${sym("off", process.stdout)} Gateway ${daemon.state}`);
+  out(`Routing: ${config.routing.policy} · local model ${config.local.model}`);
+  out(`Local models: ${localModels.length} (${formatBytes(report.local_store.bytes)})`);
+  if (report.backends.length > 0) out("Backends");
   for (const backend of report.backends) {
-    const marker = backend.available ? "up" : "down";
     const size = backend.size_b === null ? "" : ` ${backend.size_b}B`;
-    out(`  ${backend.name} (${backend.kind}${backend.explicit_only ? ", explicit pin" : ""})${size}: ${marker} — ${backend.models.join(", ")}`);
+    const pin = backend.explicit_only ? ", only when a request names it" : "";
+    out(`  ${sym(backend.available ? "on" : "off", process.stdout)} ${backend.name} (${backend.kind}${pin})${size}: ${backend.available ? "up" : "down"} · ${backend.models.join(", ")}`);
   }
   if (report.backends.length === 0) {
-    out("  no backends configured; run `sys1 setup`, `sys1 jev enable`, or `sys1 backend add`");
+    out(`${sym("warn", process.stdout)} No backends are set up, so nothing can answer yet.`);
+    out(`${sym("next", process.stdout)} sys1 setup`);
+  } else if (daemon.state !== "running") {
+    hint(flags, "sys1 up");
   }
 }
 
 async function cmdDoctor(home: string, flags: Map<string, string | boolean>): Promise<void> {
   const report = await runDoctor({ home, env: process.env });
-  if (flags.get("json") === true) {
+  if (wantsJson(flags)) {
     out(JSON.stringify(report, null, 2));
   } else {
-    for (const check of report.checks) {
-      out(`${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.summary}`);
-    }
-    out(
-      `doctor: runtime ${report.ok ? "ready" : "not ready"} (${report.counts.pass} pass, ${report.counts.warn} warn, ${report.counts.fail} fail)`,
-    );
+    out(renderChecks(report.checks, DOCTOR_NEXT));
   }
   if (!report.ok) process.exit(EXIT.doctor);
 }
@@ -460,7 +505,7 @@ async function cmdModels(home: string, flags: Map<string, string | boolean>): Pr
       size_b: backend.size_b,
     })),
   );
-  if (flags.get("json") === true) {
+  if (wantsJson(flags)) {
     out(JSON.stringify({ object: "list", data: rows }, null, 2));
     return;
   }
@@ -480,7 +525,7 @@ async function cmdPull(home: string, args: ParsedArgs): Promise<void> {
       description: entry.description,
       installed: installedModels(home).some((model) => model.id === entry.id),
     }));
-    if (args.flags.get("json") === true) {
+    if (wantsJson(args.flags)) {
       out(JSON.stringify({ object: "list", data: rows }, null, 2));
       return;
     }
@@ -496,23 +541,23 @@ async function cmdPull(home: string, args: ParsedArgs): Promise<void> {
   if (sha256 !== undefined && !/^[0-9a-f]{64}$/.test(sha256)) {
     fail("--sha256 needs 64 lowercase hexadecimal characters", EXIT.usage);
   }
-  const asJson = args.flags.get("json") === true;
-  let lastProgress = 0;
+  const asJson = wantsJson(args.flags);
+  const known = MODEL_REGISTRY.find((entry) => entry.id === ref);
+  if (isHuman(args.flags) && !("error" in resolvePullTarget(ref)) && !isInstalled(home, ref)) {
+    err(`${sym("progress", process.stderr)} Downloading ${ref}${known === undefined ? "" : ` (${formatBytes(known.bytes)})`} to ${tildePath(modelsDir(home))}…`);
+  }
+  const progress = downloadProgress(args.flags, ref);
   const result = await pullModel(home, ref, {
     ...(sha256 === undefined ? {} : { sha256 }),
-    onProgress: (done, total) => {
-      if (asJson || Date.now() - lastProgress < 1_000) return;
-      lastProgress = Date.now();
-      const suffix = total === null ? "" : ` / ${formatBytes(total)}`;
-      err(`downloading ${ref}: ${formatBytes(done)}${suffix}`);
-    },
+    onProgress: progress.update,
   });
+  progress.done();
   if (asJson) {
     out(JSON.stringify(result, null, 2));
   } else if (result.ok) {
-    out(`installed ${result.id} at ${result.path} (${formatBytes(result.bytes ?? 0)})`);
+    out(`${sym("ok", process.stdout)} Installed ${result.id} (${formatBytes(result.bytes ?? 0)}) at ${tildePath(result.path ?? modelsDir(home))}.`);
   } else {
-    err(`sys1: ${result.message ?? "model download failed"}`);
+    fail(result.message ?? "model download failed", EXIT.backend, "sys1 pull --list");
   }
   if (!result.ok) process.exit(EXIT.backend);
 }
@@ -521,7 +566,7 @@ async function cmdModel(home: string, args: ParsedArgs): Promise<void> {
   const [sub, id] = args.positional.slice(1);
   if (sub === "list") {
     const models = installedModels(home);
-    if (args.flags.get("json") === true) {
+    if (wantsJson(args.flags)) {
       out(JSON.stringify({ object: "list", data: models, bytes: storeBytes(home) }, null, 2));
       return;
     }
@@ -535,7 +580,7 @@ async function cmdModel(home: string, args: ParsedArgs): Promise<void> {
   if (sub === "verify") {
     if (id === undefined) fail("usage: sys1 model verify MODEL", EXIT.usage);
     const result = await verifyModel(home, id);
-    if (args.flags.get("json") === true) {
+    if (wantsJson(args.flags)) {
       out(JSON.stringify({ id, ...result }, null, 2));
     } else {
       out(result.ok ? `${id}: verified` : `${id}: ${result.message ?? "sha256 mismatch"}`);
@@ -546,7 +591,7 @@ async function cmdModel(home: string, args: ParsedArgs): Promise<void> {
   if (sub === "remove") {
     if (id === undefined) fail("usage: sys1 model remove MODEL", EXIT.usage);
     const result = removeModel(home, id);
-    if (args.flags.get("json") === true) {
+    if (wantsJson(args.flags)) {
       out(JSON.stringify({ id, ...result }, null, 2));
     } else {
       out(result.message);
@@ -623,7 +668,8 @@ function cmdConfig(home: string, args: ParsedArgs): void {
         fail("usage: sys1 config set <key> <value>", EXIT.usage);
       }
       if (!(key in SETTABLE_KEYS)) {
-        fail(`unknown key ${key}; settable: ${Object.keys(SETTABLE_KEYS).join(", ")}`, EXIT.usage);
+        const guess = closestMatch(key, Object.keys(SETTABLE_KEYS));
+        fail(`Unknown setting "${key}".${guess === undefined ? " The settings you can change are listed in sys1 --help." : ` Did you mean "${guess}"?`}`, EXIT.usage);
       }
       const result = setConfigValue(loaded.config, key as SettableKey, value);
       if (!result.ok) fail(result.message, EXIT.usage);
@@ -657,7 +703,7 @@ async function cmdBackend(home: string, args: ParsedArgs): Promise<void> {
   switch (sub) {
     case "list": {
       const backends = loaded.config.backends;
-      if (args.flags.get("json") === true) {
+      if (wantsJson(args.flags)) {
         out(JSON.stringify(backends, null, 2));
         return;
       }
@@ -712,13 +758,10 @@ async function cmdBackend(home: string, args: ParsedArgs): Promise<void> {
         probeTimeoutMs: loaded.config.gateway.probe_timeout_ms,
         requestTimeoutMs: loaded.config.gateway.request_timeout_ms,
       });
-      if (args.flags.get("json") === true) {
+      if (wantsJson(args.flags)) {
         out(JSON.stringify(report, null, 2));
       } else {
-        for (const check of report.checks) {
-          out(`${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.summary}`);
-        }
-        out(`backend ${backend.name}: protocol checks ${report.ok ? "passed" : "failed"}`);
+        out(renderChecks(report.checks, {}, `sys1 backend check --name ${backend.name} --json`));
       }
       if (!report.ok) process.exit(EXIT.backend);
       return;
@@ -744,12 +787,39 @@ async function main(): Promise<void> {
   const [command] = args.positional;
   const home = sys1Home(process.env);
 
-  if (args.flags.get("version") === true || command === "version") {
-    out(SYS1_VERSION);
+  currentCommand = command;
+  jsonRequested = args.flags.get("json") === true;
+  if (args.flags.get("version") === true || (command === "version" && args.flags.get("help") !== true)) {
+    if (jsonRequested) out(JSON.stringify({ name: "sys1", version: SYS1_VERSION }));
+    else out(`sys1 ${SYS1_VERSION}`);
     return;
   }
-  if (command === undefined || args.flags.get("help") === true || command === "help") {
-    out(USAGE);
+  const wantsHelp = args.flags.get("help") === true;
+  if (command === undefined && !wantsHelp) {
+    process.stdout.write(bareScreen(SYS1_VERSION));
+    return;
+  }
+  if (command === undefined || command === "help") {
+    const topic = command === "help" ? args.positional[1] : undefined;
+    if (topic === undefined) {
+      process.stdout.write(rootHelp(Object.keys(SETTABLE_KEYS)));
+      return;
+    }
+    const text = commandHelp(topic);
+    if (text === undefined) {
+      const guess = closestMatch(topic, SYS1_HELP_TOPICS);
+      fail(`No help for "${topic}".${guess === undefined ? "" : ` Did you mean "${guess}"?`}`, EXIT.usage, "sys1 --help");
+    }
+    process.stdout.write(text);
+    return;
+  }
+  if (wantsHelp) {
+    const text = commandHelp(command);
+    if (text === undefined) {
+      const guess = closestMatch(command, SYS1_COMMANDS);
+      fail(`Unknown command "${command}".${guess === undefined ? "" : ` Did you mean "${guess}"?`}`, EXIT.usage, "sys1 --help");
+    }
+    process.stdout.write(text);
     return;
   }
 
@@ -793,12 +863,52 @@ async function main(): Promise<void> {
     case "backend":
       await cmdBackend(home, args);
       return;
-    default:
-      err(`sys1: unknown command ${command}`);
-      err(USAGE);
-      process.exit(EXIT.usage);
+    default: {
+      const guess = closestMatch(command, SYS1_COMMANDS);
+      fail(`Unknown command "${command}".${guess === undefined ? "" : ` Did you mean "${guess}"?`}`, EXIT.usage, "sys1 --help");
+    }
   }
 }
+
+const DOCTOR_NEXT: Readonly<Record<string, string>> = {
+  "runtime.bun": "bun upgrade",
+  "state.directory": "sys1 config path",
+  config: "sys1 config path",
+  "native.runtime": "sys1 setup --dry-run",
+  "models.manifest": "sys1 model list",
+  "models.files": "sys1 pull",
+  "models.inventory": "sys1 model list",
+  "routing.candidates": "sys1 setup",
+  daemon: "sys1 status",
+};
+
+const CHECK_SYMBOL: Readonly<Record<DoctorCheck["status"], SymbolName>> = { pass: "ok", warn: "warn", fail: "fail" };
+
+/** SPEC § D7 check list: one symbol per check, a count, and one next step. */
+function renderChecks(
+  checks: readonly { id: string; status: DoctorCheck["status"]; summary: string }[],
+  nextFor: Readonly<Record<string, string>>,
+  fallbackNext = "sys1 doctor --json",
+): string {
+  const lines = checks.map((check) => {
+    const summary = check.summary;
+    return `${sym(CHECK_SYMBOL[check.status], process.stdout)} ${summary.charAt(0).toUpperCase()}${summary.slice(1)}`;
+  });
+  const failed = checks.filter((check) => check.status === "fail").length;
+  const warned = checks.filter((check) => check.status === "warn").length;
+  const parts = [failed === 0 ? "" : `${failed} problem${failed === 1 ? "" : "s"}`, warned === 0 ? "" : `${warned} warning${warned === 1 ? "" : "s"}`]
+    .filter((part) => part !== "");
+  lines.push("", parts.length === 0 ? `All ${checks.length} checks passed.` : `${parts.join(", ")}.`);
+  const first = checks.find((check) => check.status === "fail") ?? checks.find((check) => check.status === "warn");
+  if (first !== undefined) lines.push(`${sym("next", process.stdout)} ${nextFor[first.id] ?? fallbackNext}`);
+  return lines.join("\n");
+}
+
+// A closed pipe (`sys1 --help | head -1`) is a normal way to stop reading.
+process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EPIPE") process.exit(0);
+  throw error;
+});
 
 main().catch((error: unknown) => {
   fail(error instanceof Error ? error.message : "unexpected error", 1);

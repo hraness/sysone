@@ -7,7 +7,7 @@ local model on your machine, or a compatible server you run.
 Call Sys1 from a small Node/Bun client, embed the router in a Bun app, or run a
 local daemon that serves the Jev-compatible `POST /v1/systemone` API.
 
-Latest release: v0.10.0. Install it from the GitHub release with npm; it runs
+Latest release: v0.11.0. Install it from the GitHub release with npm; it runs
 on Bun 1.3.14 or newer.
 
 [Project site](https://sys1.io) · [Agent skills](https://sys1.io/skills) · [Protocol](#the-endpoint) · [Routing](#routing)
@@ -22,7 +22,7 @@ with Bun.
 
 ```sh
 npm install --global --allow-scripts=node-llama-cpp \
-  https://github.com/hraness/sys1/releases/download/v0.10.0/hraness-sys1-0.10.0.tgz
+  https://github.com/hraness/sys1/releases/download/v0.11.0/hraness-sys1-0.11.0.tgz
 sys1 doctor
 ```
 
@@ -43,7 +43,7 @@ release package without the optional native runtime:
 
 ```sh
 npm install --omit=optional \
-  https://github.com/hraness/sys1/releases/download/v0.10.0/hraness-sys1-0.10.0.tgz
+  https://github.com/hraness/sys1/releases/download/v0.11.0/hraness-sys1-0.11.0.tgz
 ```
 
 ```ts
@@ -457,10 +457,11 @@ remain explicit Kev operations. Protocol tests do not establish model quality.
 
 ## Diagnostics
 
-`sys1 doctor` is a bounded, machine-readable readiness check. It verifies the
+`sys1 doctor` checks the install and prints one line per check (✓, ⚠ or ✗),
+a count, and the command to run next. It verifies the
 Bun floor, state-directory access, config, native llama.cpp runtime/backend,
-manifest, every admitted artifact's GGUF header, stale/orphan store
-files, routing candidates, and daemon ownership. It does not hash entire model
+the installed-model list, every installed model's GGUF header, leftover or
+unknown files in the model folder, routing candidates, and daemon ownership. It does not hash entire model
 files; use `sys1 model verify MODEL` for exact SHA-256 verification.
 
 ```sh
@@ -486,8 +487,14 @@ sys1 config path|get|set|unset
 sys1 --version|--help
 ```
 
-Supporting commands accept `--json`. Machine data goes to stdout; diagnostics
-and download progress go to stderr.
+Supporting commands accept `--json`. When an agent runs sys1 (Claude Code,
+Codex, Cursor, Gemini CLI, or `AI_AGENT` is set), JSON is the default;
+`HRANESS_AUDIENCE=human` or `agent` overrides the guess. Machine data goes to
+stdout; diagnostics, next-step hints and download progress go to stderr. Every
+command has its own help (`sys1 setup --help`). Errors are one sentence and the
+command to run next; with `--json` they are one `{"ok":false,"error":{...}}`
+object on stdout. `sys1 setup --dry-run` shows the model, its size and the
+folder it would be downloaded to.
 
 ## Configuration
 

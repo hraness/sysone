@@ -4,7 +4,7 @@
 
 Sys1 lets agents ask yes/no, choice, and score questions and get validated answers with probabilities. You choose who answers: TypeSafe's hosted Jev, a local model on your machine, or a compatible server you run. Every backend takes the same request format, Sys1 checks each answer against the question asked, and each response says which backend produced it. Call Sys1 from a Node or Bun client, embed its router, or run its local HTTP daemon for any language. Sys1 is free and MIT licensed.
 
-Latest release: v0.10.0.
+Latest release: v0.11.0.
 
 ## Docs
 
