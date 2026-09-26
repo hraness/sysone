@@ -88,7 +88,7 @@ sys1 ${SYS1_VERSION}
     expect(JSON.parse((await sys1(["--version", "--json"])).stdout)).toEqual({ name: "sys1", version: SYS1_VERSION });
   });
 
-  test("a closed pipe exits quietly", async () => {
+  test.skipIf(process.platform === "win32")("a closed pipe exits quietly", async () => {
     const child = Bun.spawn(["/bin/sh", "-c", `"${process.execPath}" "${CLI}" --help | head -1`], { stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: "Usage: sys1 <command> [options]\n", stderr: "" });
@@ -99,7 +99,7 @@ describe("sys1 setup preview", () => {
   test("dry-run says what would be downloaded, how big, and where", async () => {
     const result = await sys1(["setup", "--dry-run"], { SYS1_HOME: join(home(), "state") });
     expect(result.code).toBe(0);
-    expect(result.stdout).toMatch(/^Would download qwen3-1\.7b \(1\.03 GiB\) to \S+\/state\/models\.$/mu);
+    expect(result.stdout).toMatch(/^Would download qwen3-1\.7b \(1\.03 GiB\) to \S+[\\/]state[\\/]models\.$/mu);
     expect(result.stderr).toBe("Next: sys1 setup\n");
     const json = JSON.parse((await sys1(["setup", "--dry-run", "--json"])).stdout);
     expect(json.download).toMatchObject({ model: "qwen3-1.7b", bytes: 1_107_409_472, installed: false });
